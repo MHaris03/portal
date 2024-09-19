@@ -64,6 +64,16 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+client.connect(err => {
+  if (err) {
+    console.error('Connection error:', err);
+  } else {
+    console.log('Connected successfully to MongoDB');
+    // Your further MongoDB operations here...
+  }
+});
+
 const transporter = nodemailer.createTransport({
   service: 'Gmail',
   auth: {
