@@ -44,7 +44,13 @@ cloudinary.config({
 // Middleware
 app.use(express.json());
 app.use(cors());
-const upload = multer({ dest: 'uploads/' });
+
+//// this is my code but error on deploy ////
+// const upload = multer({ dest: 'uploads/' });
+
+//// solve error ////
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
