@@ -53,7 +53,9 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
+// const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
+
+const uri = process.env.DATABASE_URL;
 
 const client = new MongoClient(uri, {
   serverApi: {
