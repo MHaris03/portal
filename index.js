@@ -7,7 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const cloudinary = require('cloudinary').v2;
-const port = process.env.PORT || 3003;
+const port = process.env.PORT || 5000;
 require('dotenv').config();
 
 
@@ -46,11 +46,11 @@ app.use(express.json());
 app.use(cors());
 
 //// this is my code but error on deploy ////
-// const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: 'uploads/' });
 
 //// solve error ////
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// const upload = multer({ storage });
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
@@ -64,16 +64,6 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-
-client.connect(err => {
-  if (err) {
-    console.error('Connection error:', err);
-  } else {
-    console.log('Connected successfully to MongoDB');
-    // Your further MongoDB operations here...
-  }
-});
-
 const transporter = nodemailer.createTransport({
   service: 'Gmail',
   auth: {
@@ -93,47 +83,41 @@ async function run() {
     app.post("/post-job", async (req, res) => {
       try {
         let body = req.body;
-
+    
         if (body.data) {
           body = body.data;
         }
-
-        if (body._id) {
-          body._id = new ObjectId(body._id);
+    
+        // Ensure body has required fields before proceeding
+        if (!body.companyName || !body.jobTitle) {
+          return res.status(400).send({
+            message: "Company Name and Job Title are required.",
+            status: false
+          });
         }
-
+    
         body.createdAt = new Date();
-
-        let companyId = 'v3-company-id';
-        if (body.companyName) {
-          companyId = body.companyName
-            .toLowerCase()
-            .replace(/\s+/g, '-')
-            .replace(/[^\w-]+/g, '');
-        }
+    
+        // Generate companyId based on companyName
+        let companyId = body.companyName
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^\w-]+/g, '');
+        
         body.companyId = companyId;
-
-        let job = null;
-        if (body._id) {
-          job = await jobsCollections.findOne({ _id: body._id });
-        }
-
-        let result;
-        if (job == null) {
-          result = await jobsCollections.insertOne(body);
+    
+        // Insert the new job into the database
+        const result = await jobsCollections.insertOne(body);
+    
+        if (result) {
+          return res.status(201).send({
+            message: "Job created successfully!",
+            jobId: result.insertedId,
+            status: true
+          });
         } else {
-          result = await jobsCollections.findOneAndUpdate(
-            { _id: body._id },
-            { $set: body },
-            { returnOriginal: false, upsert: true }
-          );
-        }
-        console.log(result.insertedId)
-        if (result.insertedId || result.value) {
-          return res.status(200).send(result);
-        } else {
-          return res.status(404).send({
-            message: "Cannot Insert or Update, Try Again Later!",
+          return res.status(500).send({
+            message: "Failed to create job, try again later!",
             status: false
           });
         }
@@ -145,6 +129,53 @@ async function run() {
         });
       }
     });
+    app.post("/update-job", async (req, res) => {
+      try {
+        let body = req.body;
+    
+        if (body.data) {
+          body = body.data;
+        }
+    
+        // Ensure the body contains the job ID for updating
+        if (!body._id) {
+          return res.status(400).send({
+            message: "Job ID is required for updating.",
+            status: false
+          });
+        }
+    
+        body._id = new ObjectId(body._id);
+        body.updatedAt = new Date();
+    
+        // Update the job in the database
+        const result = await jobsCollections.findOneAndUpdate(
+          { _id: body._id },
+          { $set: body },
+          { returnOriginal: false, upsert: false }
+        );
+
+        if (result) {
+          return res.status(200).send({
+            message: "Job updated successfully!",
+            job: result,
+            status: true
+          });
+        } else {
+          return res.status(404).send({
+            message: "Job not found!",
+            status: false
+          });
+        }
+      } catch (error) {
+        console.error(error);
+        return res.status(500).send({
+          message: "Internal Server Error",
+          status: false
+        });
+      }
+    });
+        
 
     app.get("/all-jobs", async (req, res) => {
       try {
@@ -324,16 +355,23 @@ async function run() {
     });
 
     app.post('/apply', authenticateToken, upload.single('cvFile'), async (req, res) => {
-      const { coverLetter, companyemail, companyjob, companyname, name, jobId } = req.body;
+      const { coverLetter, companyemail, companyjob, companyname, name, jobId ,email} = req.body;
+      console.log(req,"req")
+      console.log(email,"email")
       const cvFile = req.file;
 
-      if (!coverLetter || !cvFile || !name || !jobId) {
+      if (!coverLetter || !cvFile || !name || !email) {
         return res.status(400).send('All fields are required.');
       }
 
       try {
         const userId = req.user.userId; // Get userId from JWT payload
 
+        const existingApplication = await jobApplicationsCollection.findOne({ userId, jobId });
+        if (existingApplication) {
+          return res.status(400).json({ message: 'You have already applied for this job.' });
+        }
+const upload = multer({ dest: 'uploads/' });
         // Save application details
         await jobApplicationsCollection.insertOne({
           userId,
@@ -346,7 +384,7 @@ async function run() {
         // Send email notifications
         const mailOptionsToUser = {
           from: companyemail,
-          to: req.user.email,
+          to: email,
           subject: 'Job Application Received',
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #dddddd; border-radius: 8px; background-color: #f9f9f9;">
@@ -356,7 +394,7 @@ async function run() {
                     Thank you for applying for the position of <strong>${companyjob}</strong> at <strong>${companyname}</strong>. We have received your application.
                 </p>
                 <p style="font-size: 16px; color: #555555; text-align: center;">
-                You can visit our website for more job opportunities: <a href="https://jobportal-web.vercel.app/" style="color: #1a73e8;">We Hire</a>
+                You can visit our website for more job opportunities: <a href="https://aidifys.com/" style="color: #1a73e8;">Aidifys</a>
                 </p>
                 <p style="font-size: 16px; color: #555555;">
                     Best regards,<br/>
@@ -367,13 +405,13 @@ async function run() {
         };
 
         const mailOptionsToCompany = {
-          from: req.user.email,
+          from: email,
           to: companyemail,
           subject: 'New Job Application',
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #dddddd; border-radius: 8px; background-color: #f9f9f9;">
                 <h2 style="text-align: center; color: #333333;">New Job Application Received</h2>
-                <p style="font-size: 16px; color: #555555;">A new job application has been received from <strong>${req.user.email}</strong>.</p>
+                <p style="font-size: 16px; color: #555555;">A new job application has been received from <strong>${email}</strong>.</p>
                 <p style="font-size: 16px; color: #555555;">
                     <strong>Job Title:</strong> ${companyjob}<br/>
                     <strong>Applicant Name:</strong> ${name}
