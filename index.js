@@ -53,14 +53,22 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+// const transporter = nodemailer.createTransport({
+//   host: 'smtp.hostinger.com',
+//   port: 465,
+//   secure: true,
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS,
+//   },
+// });
+
 const transporter = nodemailer.createTransport({
-  host: 'smtp.hostinger.com',
-  port: 465,
-  secure: true,
+  service: 'Gmail',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+    pass: process.env.EMAIL_PASS
+  }
 });
 
 async function run() {
@@ -353,16 +361,14 @@ async function run() {
         }
     
         if (action === "like") {
-          // Add job to the user's liked jobs
           await usersCollection.updateOne(
             { _id: new ObjectId(userId) },
-            { $addToSet: { likedJobs: jobId } } // Prevent duplicates with $addToSet
+            { $addToSet: { likedJobs: jobId } } 
           );
         } else if (action === "unlike") {
-          // Remove job from the user's liked jobs
           await usersCollection.updateOne(
             { _id: new ObjectId(userId) },
-            { $pull: { likedJobs: jobId } } // Remove the job ID from the list
+            { $pull: { likedJobs: jobId } }
           );
         } else {
           return res.status(400).json({ message: "Invalid action. Use 'like' or 'unlike'." });
@@ -416,7 +422,7 @@ async function run() {
                 </p>
                 <p style="font-size: 16px; color: #555555;">
                     Best regards,<br/>
-                    <strong>${companyname}</strong>
+                    <strong>Aidifys Hiring</strong>
                 </p>
             </div>
           `
