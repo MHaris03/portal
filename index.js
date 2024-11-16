@@ -15,9 +15,6 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  console.log('Authorization Header:', authHeader);
-  console.log('Token:', token);
-
   if (token == null) return res.status(401).json({ message: 'Token missing' });
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
@@ -30,27 +27,19 @@ const authenticateToken = (req, res, next) => {
     req.user = user;
     next();
   });
-  
+
 };
 
-
-// Cloudinary configuration
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Middleware
 app.use(express.json());
 app.use(cors());
-
-//// this is my code but error on deploy ////
 const upload = multer({ dest: 'uploads/' });
-
-//// solve error ////
 const storage = multer.memoryStorage();
-// const upload = multer({ storage });
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
@@ -65,11 +54,13 @@ const client = new MongoClient(uri, {
   },
 });
 const transporter = nodemailer.createTransport({
-  service: 'Gmail',
+  host: 'smtp.hostinger.com',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
 async function run() {
@@ -79,37 +70,36 @@ async function run() {
     const jobsCollections = db.collection("demoJobs");
     const usersCollection = db.collection("users");
     const jobApplicationsCollection = db.collection("jobApplications");
+    const SUPER_ADMIN_EMAIL = "usama.mang0901@gmail.com";
 
     app.post("/post-job", async (req, res) => {
       try {
         let body = req.body;
-    
+
         if (body.data) {
           body = body.data;
         }
-    
-        // Ensure body has required fields before proceeding
-        if (!body.companyName || !body.jobTitle) {
+
+        if (!body.companyName || !body.jobTitle || !body.useremail) {
           return res.status(400).send({
-            message: "Company Name and Job Title are required.",
+            message: "Company Name, Job Title, and User Email are required.",
             status: false
           });
         }
-    
+
         body.createdAt = new Date();
-    
-        // Generate companyId based on companyName
+        body.superAdminEmail = SUPER_ADMIN_EMAIL;
+
         let companyId = body.companyName
           .toLowerCase()
           .replace(/\s+/g, '-')
           .replace(/[^\w-]+/g, '');
-        
+
         body.companyId = companyId;
-    
-        // Insert the new job into the database
+
         const result = await jobsCollections.insertOne(body);
-    
-        if (result) {
+
+        if (result.insertedId) {
           return res.status(201).send({
             message: "Job created successfully!",
             jobId: result.insertedId,
@@ -129,26 +119,25 @@ async function run() {
         });
       }
     });
+
     app.post("/update-job", async (req, res) => {
       try {
         let body = req.body;
-    
+
         if (body.data) {
           body = body.data;
         }
-    
-        // Ensure the body contains the job ID for updating
+
         if (!body._id) {
           return res.status(400).send({
             message: "Job ID is required for updating.",
             status: false
           });
         }
-    
+
         body._id = new ObjectId(body._id);
         body.updatedAt = new Date();
-    
-        // Update the job in the database
+        body.superAdminEmail = body.superAdminEmail || "usama.mang0901@gmail.com";
         const result = await jobsCollections.findOneAndUpdate(
           { _id: body._id },
           { $set: body },
@@ -175,12 +164,10 @@ async function run() {
         });
       }
     });
-        
 
     app.get("/all-jobs", async (req, res) => {
       try {
         const jobs = await jobsCollections.find({}).toArray();
-        console.log(jobs)
         res.send(jobs);
       } catch (error) {
         console.error(error);
@@ -209,7 +196,6 @@ async function run() {
       try {
         const jobs = await jobsCollections.find({ jobLocation }).toArray();
         res.json(jobs);
-        console.log(res)
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: 'Internal Server Error' });
@@ -229,11 +215,9 @@ async function run() {
 
     app.get("/all-jobs/:id", async (req, res) => {
       const id = req.params.id;
-      console.log(req.params);
       const job = await jobsCollections.findOne({
         _id: new ObjectId(id)
       });
-      console.log(job);
       res.send(job);
     });
 
@@ -257,38 +241,45 @@ async function run() {
     });
 
     app.get("/myJobs/:email", async (req, res) => {
-      const Jobs = await jobsCollections.find({ postedBy: req.params.email }).toArray();
-      res.send(Jobs);
+      try {
+        const userEmail = req.params.email;
+
+        if (userEmail === SUPER_ADMIN_EMAIL) {
+          const allJobs = await jobsCollections.find({}).toArray();
+          return res.send(allJobs);
+        } else {
+          const userJobs = await jobsCollections.find({ useremail: userEmail }).toArray();
+          return res.send(userJobs);
+        }
+      } catch (error) {
+        console.error(error);
+        return res.status(500).send({
+          message: "Internal Server Error",
+          status: false
+        });
+      }
     });
 
     app.delete("/job/:id", async (req, res) => {
       const id = req.params.id;
-      console.log(req.params);
       const filter = { _id: new ObjectId(id) };
       const result = await jobsCollections.deleteOne(filter);
       res.send(result);
     });
 
-    // Signup endpoint
     app.post("/signup", async (req, res) => {
       const { firstName, lastName, email, password, phoneNumber } = req.body;
 
       try {
-        // Check if user with provided email already exists
         const existingUser = await usersCollection.findOne({ email });
         if (existingUser) {
           return res.status(400).json({ message: "User already exists" });
         }
-
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
+        const userId = new ObjectId();
 
-        // Generate a unique user ID
-        const userId = new ObjectId(); // Generate ObjectId
-
-        // Create user document
         const newUser = {
-          _id: userId, // Assign ObjectId as the user ID
+          _id: userId,
           firstName,
           lastName,
           email,
@@ -296,52 +287,45 @@ async function run() {
           phoneNumber,
         };
 
-        // Insert user into the database
         await usersCollection.insertOne(newUser);
 
-        res.status(201).json({ message: "User created successfully", userId }); // Return userId in the response
+        res.status(201).json({ message: "User created successfully", userId });
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
       }
     });
 
-    // Login endpoint
     app.post("/login", async (req, res) => {
       const { email, password } = req.body;
-
+    
       try {
-        // Check if user with provided email exists
         const user = await usersCollection.findOne({ email });
         if (!user) {
           return res.status(404).json({ message: "User not found" });
         }
-
-        // Compare passwords
+    
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) {
           return res.status(401).json({ message: "Invalid credentials" });
         }
-
-        // Generate JWT token
+    
         const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-
-        // Send back the token, user's name, and user's ID
-        res.json({ token, name: user.firstName, userId: user._id });
+    
+        const likedJobs = user.likedJobs;  
+    
+        res.json({ token, name: user.firstName, userId: user._id, likedJobs });
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
       }
     });
+    
 
     app.get('/user-info/:email', async (req, res) => {
       const userEmail = req.params.email;
-      console.log(userEmail, "this is user email");
-
       try {
-        // Find the user by email
         const user = await usersCollection.findOne({ email: userEmail });
-        console.log("🚀 ~ app.get ~ user:", user);
 
         if (!user) {
           return res.status(404).json({ message: 'User not found' });
@@ -354,10 +338,46 @@ async function run() {
       }
     });
 
+    app.post("/job/like", authenticateToken, async (req, res) => {
+      const { jobId, userId, action } = req.body;
+    
+      if (!jobId || !userId || !action) {
+        return res.status(400).json({ message: "Invalid request. Job ID, user ID, and like/unlike action are required." });
+      }
+    
+      try {
+        const job = await jobsCollections.findOne({ _id: new ObjectId(jobId) });
+    
+        if (!job) {
+          return res.status(404).json({ message: "Job not found." });
+        }
+    
+        if (action === "like") {
+          // Add job to the user's liked jobs
+          await usersCollection.updateOne(
+            { _id: new ObjectId(userId) },
+            { $addToSet: { likedJobs: jobId } } // Prevent duplicates with $addToSet
+          );
+        } else if (action === "unlike") {
+          // Remove job from the user's liked jobs
+          await usersCollection.updateOne(
+            { _id: new ObjectId(userId) },
+            { $pull: { likedJobs: jobId } } // Remove the job ID from the list
+          );
+        } else {
+          return res.status(400).json({ message: "Invalid action. Use 'like' or 'unlike'." });
+        }
+    
+        res.status(200).json({ success: true, message: `Job successfully ${action}d.` });
+      } catch (error) {
+        console.error("Error updating liked jobs:", error);
+        res.status(500).json({ message: "Internal server error." });
+      }
+    });
+    
+
     app.post('/apply', authenticateToken, upload.single('cvFile'), async (req, res) => {
-      const { coverLetter, companyemail, companyjob, companyname, name, jobId ,email} = req.body;
-      console.log(req,"req")
-      console.log(email,"email")
+      const { coverLetter, companyemail, companyjob, companyname, name, jobId, email } = req.body;
       const cvFile = req.file;
 
       if (!coverLetter || !cvFile || !name || !email) {
@@ -365,14 +385,13 @@ async function run() {
       }
 
       try {
-        const userId = req.user.userId; // Get userId from JWT payload
+        const userId = req.user.userId;
 
         const existingApplication = await jobApplicationsCollection.findOne({ userId, jobId });
         if (existingApplication) {
           return res.status(400).json({ message: 'You have already applied for this job.' });
         }
-const upload = multer({ dest: 'uploads/' });
-        // Save application details
+        const upload = multer({ dest: 'uploads/' });
         await jobApplicationsCollection.insertOne({
           userId,
           jobId,
@@ -381,9 +400,8 @@ const upload = multer({ dest: 'uploads/' });
           appliedAt: new Date(),
         });
 
-        // Send email notifications
         const mailOptionsToUser = {
-          from: companyemail,
+          from: 'jobs@aidifys.com',
           to: email,
           subject: 'Job Application Received',
           html: `
@@ -405,7 +423,7 @@ const upload = multer({ dest: 'uploads/' });
         };
 
         const mailOptionsToCompany = {
-          from: email,
+          from: 'jobs@aidifys.com',
           to: companyemail,
           subject: 'New Job Application',
           html: `
@@ -430,22 +448,18 @@ const upload = multer({ dest: 'uploads/' });
           ]
         };
 
-        // Send email to user
         transporter.sendMail(mailOptionsToUser, (error, info) => {
           if (error) {
             console.error('Error sending email to user:', error);
           } else {
-            console.log('Email sent to user:', info);
           }
         });
 
-        // Send email to company
         transporter.sendMail(mailOptionsToCompany, (error, info) => {
           if (error) {
             console.error('Error sending email to company:', error);
             return res.status(500).send('Error submitting application.');
           } else {
-            console.log('Email sent to company:', info);
             res.status(200).json({
               success: true,
               message: "Application Submitted Successfully!",
@@ -462,11 +476,9 @@ const upload = multer({ dest: 'uploads/' });
       try {
         const userId = req.user.userId;
 
-        // Find jobs applied by this user
         const applications = await jobApplicationsCollection.find({ userId }).toArray();
         const jobIds = applications.map(app => app.jobId);
 
-        // Get details of these jobs
         const jobs = await jobsCollections.find({ _id: { $in: jobIds.map(id => new ObjectId(id)) } }).toArray();
 
         res.json(jobs);
@@ -476,12 +488,11 @@ const upload = multer({ dest: 'uploads/' });
       }
     });
 
-    // Cloudinary signature endpoint
     app.post('/generate-signature', (req, res) => {
       const timestamp = Math.round((new Date()).getTime() / 1000);
       const signature = cloudinary.utils.api_sign_request({
         timestamp: timestamp,
-        upload_preset: 'preset1' // replace with your actual upload preset
+        upload_preset: 'Aidifys'
       }, process.env.CLOUDINARY_API_SECRET);
 
       res.json({ timestamp, signature });
