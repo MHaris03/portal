@@ -53,23 +53,23 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-// const transporter = nodemailer.createTransport({
-//   host: 'smtp.hostinger.com',
-//   port: 465,
-//   secure: true,
-//   auth: {
-//     user: process.env.EMAIL_USER,
-//     pass: process.env.EMAIL_PASS,
-//   },
-// });
-
 const transporter = nodemailer.createTransport({
-  service: 'Gmail',
+  host: 'smtp.hostinger.com',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
+    pass: process.env.EMAIL_PASS,
+  },
 });
+
+// const transporter = nodemailer.createTransport({
+//   service: 'Gmail',
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS
+//   }
+// });
 
 async function run() {
   try {
@@ -306,29 +306,29 @@ async function run() {
 
     app.post("/login", async (req, res) => {
       const { email, password } = req.body;
-    
+
       try {
         const user = await usersCollection.findOne({ email });
         if (!user) {
           return res.status(404).json({ message: "User not found" });
         }
-    
+
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) {
           return res.status(401).json({ message: "Invalid credentials" });
         }
-    
+
         const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    
-        const likedJobs = user.likedJobs;  
-    
+
+        const likedJobs = user.likedJobs;
+
         res.json({ token, name: user.firstName, userId: user._id, likedJobs });
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
       }
     });
-    
+
 
     app.get('/user-info/:email', async (req, res) => {
       const userEmail = req.params.email;
@@ -348,22 +348,22 @@ async function run() {
 
     app.post("/job/like", authenticateToken, async (req, res) => {
       const { jobId, userId, action } = req.body;
-    
+
       if (!jobId || !userId || !action) {
         return res.status(400).json({ message: "Invalid request. Job ID, user ID, and like/unlike action are required." });
       }
-    
+
       try {
         const job = await jobsCollections.findOne({ _id: new ObjectId(jobId) });
-    
+
         if (!job) {
           return res.status(404).json({ message: "Job not found." });
         }
-    
+
         if (action === "like") {
           await usersCollection.updateOne(
             { _id: new ObjectId(userId) },
-            { $addToSet: { likedJobs: jobId } } 
+            { $addToSet: { likedJobs: jobId } }
           );
         } else if (action === "unlike") {
           await usersCollection.updateOne(
@@ -373,14 +373,14 @@ async function run() {
         } else {
           return res.status(400).json({ message: "Invalid action. Use 'like' or 'unlike'." });
         }
-    
+
         res.status(200).json({ success: true, message: `Job successfully ${action}d.` });
       } catch (error) {
         console.error("Error updating liked jobs:", error);
         res.status(500).json({ message: "Internal server error." });
       }
     });
-    
+
 
     app.post('/apply', authenticateToken, upload.single('cvFile'), async (req, res) => {
       const { coverLetter, companyemail, companyjob, companyname, name, jobId, email } = req.body;
