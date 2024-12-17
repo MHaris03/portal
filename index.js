@@ -2,6 +2,7 @@ const express = require('express');
 const app = express();
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const crypto = require("crypto");
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
@@ -40,6 +41,8 @@ app.use(express.json());
 app.use(cors());
 const upload = multer({ dest: 'uploads/' });
 const storage = multer.memoryStorage();
+const imageUpload = multer({ storage: storage });
+const logoUrl = "https://res.cloudinary.com/dfs0l1ady/image/upload/v1734176190/weblogo_wvjxtg.jpg";
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@men-job-portal.ddye6po.mongodb.net/?retryWrites=true&w=majority`;
@@ -61,6 +64,8 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  // logger: true,
+  // debug: true
 });
 
 // const transporter = nodemailer.createTransport({
@@ -78,6 +83,8 @@ async function run() {
     const jobsCollections = db.collection("demoJobs");
     const usersCollection = db.collection("users");
     const jobApplicationsCollection = db.collection("jobApplications");
+    const otpCollection = db.collection("otp");
+    const blogsCollection = db.collection("blogs");
     const SUPER_ADMIN_EMAIL = "usama.mang0901@gmail.com";
 
     app.post("/post-job", async (req, res) => {
@@ -283,24 +290,260 @@ async function run() {
         if (existingUser) {
           return res.status(400).json({ message: "User already exists" });
         }
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const userId = new ObjectId();
 
+        const otp = Math.floor(100000 + Math.random() * 900000);
+
+        await otpCollection.insertOne({
+          email,
+          otp,
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        });
+
+        try {
+          await transporter.sendMail({
+            from: "jobs@aidifys.com",
+            to: email,
+            subject: "Signup OTP Verification Code",
+            html: `
+           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #F7F9FC; padding: 30px; border-radius: 10px; max-width: 600px; margin: auto;">
+                <!-- Logo -->
+                <div style="margin-bottom: 20px;">
+                  <img src="${logoUrl}" alt="Company Logo" style="max-width: 150px; height: auto;" />
+                </div>
+    
+                <!-- OTP Message -->
+                <h2 style="color: #007BFF;">Your OTP code for Signup</h2>
+                <p style="font-size: 18px; font-weight: bold; margin: 20px 0;">
+                  ${otp}
+                </p>
+                <p style="font-size: 14px; color: #555;">
+                  This OTP is valid for <strong>10 minutes</strong>. Please do not share it with anyone.
+                </p>
+    
+                <!-- Footer -->
+                <p style="font-size: 12px; color: #999; margin-top: 30px;">
+                  &copy; ${new Date().getFullYear()} Aidifys Hiring. All Rights Reserved.
+                </p>
+              </div>
+            `,
+          });
+
+          res.status(200).json({ message: "OTP sent to email. Please verify." });
+        } catch (error) {
+          console.error("Email send error:", error);
+          return res.status(500).json({ message: "Failed to send OTP email." });
+        }
+      } catch (error) {
+        console.error("Signup error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/verify-otp", async (req, res) => {
+      const { email, otp } = req.body;
+
+      try {
+        const record = await otpCollection.findOne({ email });
+
+        if (!record) {
+          return res.status(400).json({ message: "Invalid OTP or email." });
+        }
+
+        if (record.expiresAt < new Date()) {
+          return res.status(400).json({ message: "OTP expired. Please request a new OTP." });
+        }
+
+        if (record.otp !== parseInt(otp)) {
+          return res.status(400).json({ message: "Incorrect OTP." });
+        }
+
+        const hashedPassword = await bcrypt.hash(req.body.password, 10);
         const newUser = {
-          _id: userId,
-          firstName,
-          lastName,
+          firstName: req.body.firstName,
+          lastName: req.body.lastName,
           email,
           password: hashedPassword,
-          phoneNumber,
+          phoneNumber: req.body.phoneNumber,
         };
 
         await usersCollection.insertOne(newUser);
+        await otpCollection.deleteOne({ email });
 
-        res.status(201).json({ message: "User created successfully", userId });
+        res.status(201).json({ message: "User created successfully" });
       } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal Server Error' });
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/resend-otp", async (req, res) => {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ message: "Email is required." });
+      }
+
+      try {
+        const existingOtpRecord = await otpCollection.findOne({ email });
+        if (!existingOtpRecord) {
+          return res.status(400).json({ message: "No OTP request found for this email." });
+        }
+
+        const newOtp = Math.floor(100000 + Math.random() * 900000);
+
+        await otpCollection.updateOne(
+          { email },
+          {
+            $set: {
+              otp: newOtp,
+              createdAt: new Date(),
+              expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            },
+          }
+        );
+
+        try {
+          await transporter.sendMail({
+            from: "jobs@aidifys.com",
+            to: email,
+            subject: "Resend OTP Verification Code",
+            html: `
+           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #F7F9FC; padding: 30px; border-radius: 10px; max-width: 600px; margin: auto;">
+                <!-- Logo -->
+                <div style="margin-bottom: 20px;">
+                  <img src="${logoUrl}" alt="Company Logo" style="max-width: 150px; height: auto;" />
+                </div>
+    
+                <!-- OTP Message -->
+                <h2 style="color: #007BFF;">Your New OTP for Verification Code</h2>
+                <p style="font-size: 18px; font-weight: bold; margin: 20px 0;">
+                  ${newOtp}
+                </p>
+                <p style="font-size: 14px; color: #555;">
+                  This OTP is valid for <strong>10 minutes</strong>. Please do not share it with anyone.
+                </p>
+    
+                <!-- Footer -->
+                <p style="font-size: 12px; color: #999; margin-top: 30px;">
+                  &copy; ${new Date().getFullYear()} Aidifys Hiring. All Rights Reserved.
+                </p>
+              </div>
+            `,
+          });
+
+          res.status(200).json({ message: "OTP resent to your email." });
+        } catch (emailError) {
+          console.error("Error sending email:", emailError);
+          return res.status(500).json({ message: "Failed to resend OTP email." });
+        }
+      } catch (error) {
+        console.error("Resend OTP error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/forgot-password", async (req, res) => {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ message: "Email is required." });
+      }
+
+      try {
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+          return res.status(404).json({ message: "User not found." });
+        }
+
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+
+        await usersCollection.updateOne(
+          { email },
+          { $set: { resetToken, resetTokenExpiry } }
+        );
+
+        const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
+
+        await transporter.sendMail({
+          from: "jobs@aidifys.com",
+          to: email,
+          subject: "Password Reset Request",
+          html: `
+           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #F7F9FC; padding: 30px; border-radius: 10px; max-width: 600px; margin: auto;">
+          <!-- Logo -->
+          <div style="text-align: center; margin-bottom: 20px;">
+          <img src="${logoUrl}" alt="Company Logo" style="max-width: 150px; height: auto;" />
+          </div>
+
+           <!-- Title -->
+          <h2 style="text-align: center; color: #333; margin-bottom: 20px;">Need a New Password?</h2>
+
+           <!-- Text -->
+         <p style="text-align: center; color: #555; font-size: 16px; margin-bottom: 30px;">
+          No worries. Click the button below to reset and choose a new one. This link is valid for <strong>1 hour</strong>.
+         </p>
+
+          <!-- Button -->
+          <div style="text-align: center; margin: 20px;">
+          <a href="${resetLink}"
+           style="display: inline-block; background-color: #3b82f6; color: #ffffff; padding: 12px 25px; font-size: 16px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+            Reset Password
+           </a>
+          </div>
+
+         <!-- Footer -->
+       <p style="text-align: center; color: #777; font-size: 14px; margin-top: 40px;">
+        Didn’t request this change? You can ignore this email and get back to 
+        <a href="https://aidifys.com/" style="color: #1a73e8; text-decoration: none;">Aidifys Hiring</a>.
+        </p>
+  
+        <p style="text-align: center; font-size: 12px; color: #999; margin-top: 20px;">
+            &copy; ${new Date().getFullYear()} Aidifys Hiring. All Rights Reserved.
+          </p>
+        </div>
+
+          `,
+        });
+
+        res.status(200).json({ message: "Password reset link sent to your email." });
+      } catch (error) {
+        console.error("Error in forgot-password API:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/reset-password", async (req, res) => {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res.status(400).json({ message: "Token and new password are required." });
+      }
+
+      try {
+        const user = await usersCollection.findOne({
+          resetToken: token,
+          resetTokenExpiry: { $gt: new Date() },
+        });
+
+        if (!user) {
+          return res.status(400).json({ message: "Invalid or expired token." });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await usersCollection.updateOne(
+          { email: user.email },
+          {
+            $set: { password: hashedPassword },
+            $unset: { resetToken: "", resetTokenExpiry: "" },
+          }
+        );
+
+        res.status(200).json({ message: "Password has been reset successfully." });
+      } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
       }
     });
 
@@ -411,25 +654,36 @@ async function run() {
           to: email,
           subject: 'Job Application Received',
           html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #dddddd; border-radius: 8px; background-color: #f9f9f9;">
-                <h2 style="text-align: center; color: #333333;">Job Application Received</h2>
-                <p style="font-size: 16px; color: #555555;">Dear Applicant,</p>
-                <p style="font-size: 16px; color: #555555;">
-                    Thank you for applying for the position of <strong>${companyjob}</strong> at <strong>${companyname}</strong>. We have received your application.
-                </p>
-                <p style="font-size: 16px; color: #555555; text-align: center;">
-                You can visit our website for more job opportunities: <a href="https://aidifys.com/" style="color: #1a73e8;">Aidifys</a>
-                </p>
-                <p style="font-size: 16px; color: #555555;">
-                    Best regards,<br/>
-                    <strong>Aidifys Hiring</strong>
-                </p>
-            </div>
+           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #dddddd; border-radius: 8px; background-color: #f9f9f9; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);">
+    <div style="text-align: center; margin-bottom: 30px;">
+        <img src="${logoUrl}" alt="Company Logo" style="max-width: 150px; height: auto; margin: 0 auto; display: block;" />
+    </div>
+    <h2 style="text-align: center; color: #333333; font-size: 24px; font-weight: 600; margin-bottom: 20px;">
+        Job Application Received
+    </h2>
+    <p style="font-size: 16px; color: #555555; line-height: 1.6;">
+        Dear Applicant,
+    </p>
+    <p style="font-size: 16px; color: #555555; line-height: 1.6;">
+        Thank you for applying for the position of <strong>${companyjob}</strong> at <strong>${companyname}</strong>. We have received your application.
+    </p>
+    <p style="font-size: 16px; color: #555555; text-align: center; line-height: 1.6;">
+        You can visit our website for more job opportunities: 
+        <a href="https://aidifys.com/" style="color: #1a73e8; text-decoration: none; font-weight: 600;">
+            Aidifys Hiring
+        </a>
+    </p>
+    <p style="font-size: 16px; color: #555555; line-height: 1.6;">
+        Best regards,<br/>
+        <strong>Aidifys Hiring</strong>
+    </p>
+</div>
+
           `
         };
 
         const mailOptionsToCompany = {
-          from: 'jobs@aidifys.com',
+          from: "jobs@aidifys.com",
           to: companyemail,
           subject: 'New Job Application',
           html: `
@@ -493,6 +747,105 @@ async function run() {
         res.status(500).json({ message: 'Internal Server Error' });
       }
     });
+    app.post("/create-blog", imageUpload.single("image"), async (req, res) => {
+      const { title, content } = req.body;
+      const image = req.file;
+
+      if (!title || !content || !image) {
+        return res.status(400).json({ message: "All fields are required, including the image" });
+      }
+
+      try {
+        const uploadResponse = await cloudinary.uploader.upload_stream(
+          { folder: "blogs", resource_type: "auto" },
+          async (error, result) => {
+            if (error) {
+              console.error("Cloudinary upload error:", error);
+              return res.status(500).json({ message: "Error uploading to Cloudinary", error: error.message });
+            }
+
+            const newBlog = {
+              title,
+              content,
+              imageUrl: result.secure_url,
+              cloudinaryId: result.public_id,
+              createdAt: new Date(),
+            };
+
+            const result1 = await blogsCollection.insertOne(newBlog);
+            res.status(201).json({ message: "Blog created successfully", blogId: result1.insertedId });
+          }
+        );
+
+        uploadResponse.end(image.buffer);
+
+      } catch (error) {
+        console.error("Error:", error.message);
+        res.status(500).json({ message: "Internal Server Error", error: error.message });
+      }
+    });
+
+    app.delete("/delete-blog/:id", async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        const blog = await blogsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!blog) {
+          return res.status(404).json({ message: "Blog not found." });
+        }
+
+        if (blog.cloudinaryId) {
+          await cloudinary.uploader.destroy(blog.cloudinaryId);
+        }
+
+        const result = await blogsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Blog not found." });
+        }
+
+        res.status(200).json({ message: "Blog and its image deleted successfully" });
+      } catch (error) {
+        res.status(500).json({ message: "Internal Server Error", error: error.message });
+      }
+    });
+    app.get("/blog-detail/:id", async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        const blog = await blogsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!blog) {
+          return res.status(404).json({ message: "Blog not found." });
+        }
+
+        res.status(200).json({ blog });
+      } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+    app.get("/blogs", async (req, res) => {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 9;
+
+      const skip = (page - 1) * limit;
+
+      try {
+        const totalBlogs = await blogsCollection.countDocuments();
+        const blogs = await blogsCollection.find().skip(skip).limit(limit).toArray();
+
+        res.status(200).json({
+          blogs,
+          totalBlogs,
+          totalPages: Math.ceil(totalBlogs / limit),
+          currentPage: page,
+        });
+      } catch (error) {
+        res.status(500).json({ message: "Internal Server Error", error: error.message });
+      }
+    });
+
 
     app.post('/generate-signature', (req, res) => {
       const timestamp = Math.round((new Date()).getTime() / 1000);
