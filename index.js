@@ -291,7 +291,7 @@ async function run() {
           return res.status(400).json({ message: "User already exists" });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000);
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         await otpCollection.insertOne({
           email,
@@ -342,22 +342,24 @@ async function run() {
 
     app.post("/verify-otp", async (req, res) => {
       const { email, otp } = req.body;
-
+    
       try {
         const record = await otpCollection.findOne({ email });
-
+    
         if (!record) {
           return res.status(400).json({ message: "Invalid OTP or email." });
         }
-
+    
         if (record.expiresAt < new Date()) {
           return res.status(400).json({ message: "OTP expired. Please request a new OTP." });
         }
-
-        if (record.otp !== parseInt(otp)) {
+    
+        const inputOtp = otp.join("");
+    
+        if (record.otp !== inputOtp) {
           return res.status(400).json({ message: "Incorrect OTP." });
         }
-
+    
         const hashedPassword = await bcrypt.hash(req.body.password, 10);
         const newUser = {
           firstName: req.body.firstName,
@@ -366,15 +368,16 @@ async function run() {
           password: hashedPassword,
           phoneNumber: req.body.phoneNumber,
         };
-
+    
         await usersCollection.insertOne(newUser);
         await otpCollection.deleteOne({ email });
-
+    
         res.status(201).json({ message: "User created successfully" });
       } catch (error) {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+    
 
     app.post("/resend-otp", async (req, res) => {
       const { email } = req.body;
@@ -389,7 +392,7 @@ async function run() {
           return res.status(400).json({ message: "No OTP request found for this email." });
         }
 
-        const newOtp = Math.floor(100000 + Math.random() * 900000);
+        const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
         await otpCollection.updateOne(
           { email },
@@ -463,7 +466,10 @@ async function run() {
           { $set: { resetToken, resetTokenExpiry } }
         );
 
-        const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
+        const resetLink = `https://www.aidifys.com/reset-password?token=${resetToken}`;
+        
+        ////local link ///
+        // const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
 
         await transporter.sendMail({
           from: "jobs@aidifys.com",
