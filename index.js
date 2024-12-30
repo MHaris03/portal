@@ -195,10 +195,27 @@ async function run() {
 
     app.get("/company-jobs/:companyId", async (req, res) => {
       const companyId = req.params.companyId;
+      const page = parseInt(req.query.page) || 1;
+      const limit = 10;
+      const skip = (page - 1) * limit;
 
       try {
-        const jobs = await jobsCollections.find({ companyId }).toArray();
-        res.json(jobs);
+        const jobs = await jobsCollections
+          .find({ companyId })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const totalJobs = await jobsCollections.countDocuments({ companyId });
+        const totalPages = Math.ceil(totalJobs / limit);
+
+        res.json({
+          jobs,
+          totalPages,
+          currentPage: page,
+          totalJobs,
+        });
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: 'Internal Server Error' });
@@ -207,27 +224,60 @@ async function run() {
 
     app.get("/location-jobs/:jobLocation", async (req, res) => {
       const jobLocation = req.params.jobLocation;
+      const page = parseInt(req.query.page) || 1;
+      const limit = 10;
+      const skip = (page - 1) * limit;
 
       try {
-        const jobs = await jobsCollections.find({ jobLocation }).toArray();
-        res.json(jobs);
+        const jobs = await jobsCollections
+          .find({ jobLocation })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const totalJobs = await jobsCollections.countDocuments({ jobLocation });
+        const totalPages = Math.ceil(totalJobs / limit);
+
+        res.json({
+          jobs,
+          totalPages,
+          currentPage: page,
+          totalJobs,
+        });
       } catch (error) {
         console.error(error);
-        res.status(500).send({ message: 'Internal Server Error' });
+        res.status(500).send({ message: "Internal Server Error" });
       }
     });
-
     app.get("/categories/:category", async (req, res) => {
       const category = req.params.category;
+      const page = parseInt(req.query.page) || 1;
+      const limit = 10;
+      const skip = (page - 1) * limit;
+
       try {
-        const jobs = await jobsCollections.find({ category }).toArray();
-        res.json(jobs);
+        const jobs = await jobsCollections
+          .find({ category })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const totalJobs = await jobsCollections.countDocuments({ category });
+        const totalPages = Math.ceil(totalJobs / limit);
+
+        res.json({
+          jobs,
+          totalPages,
+          currentPage: page,
+          totalJobs,
+        });
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: 'Internal Server Error' });
       }
     });
-
     app.get("/all-jobs/:id", async (req, res) => {
       const id = req.params.id;
       const job = await jobsCollections.findOne({
@@ -258,22 +308,46 @@ async function run() {
     app.get("/myJobs/:email", async (req, res) => {
       try {
         const userEmail = req.params.email;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+
+        let jobs;
+        let totalJobs;
 
         if (userEmail === SUPER_ADMIN_EMAIL) {
-          const allJobs = await jobsCollections.find({}).toArray();
-          return res.send(allJobs);
+          totalJobs = await jobsCollections.countDocuments({});
+          jobs = await jobsCollections
+            .find({})
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
         } else {
-          const userJobs = await jobsCollections.find({ useremail: userEmail }).toArray();
-          return res.send(userJobs);
+          totalJobs = await jobsCollections.countDocuments({ useremail: userEmail });
+          jobs = await jobsCollections
+            .find({ useremail: userEmail })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
         }
+
+        res.send({
+          jobs,
+          totalJobs,
+          totalPages: Math.ceil(totalJobs / limit),
+          currentPage: page,
+        });
       } catch (error) {
         console.error(error);
-        return res.status(500).send({
+        res.status(500).send({
           message: "Internal Server Error",
-          status: false
+          status: false,
         });
       }
     });
+
 
     app.delete("/job/:id", async (req, res) => {
       const id = req.params.id;
@@ -342,24 +416,24 @@ async function run() {
 
     app.post("/verify-otp", async (req, res) => {
       const { email, otp } = req.body;
-    
+
       try {
         const record = await otpCollection.findOne({ email });
-    
+
         if (!record) {
           return res.status(400).json({ message: "Invalid OTP or email." });
         }
-    
+
         if (record.expiresAt < new Date()) {
           return res.status(400).json({ message: "OTP expired. Please request a new OTP." });
         }
-    
+
         const inputOtp = otp.join("");
-    
+
         if (record.otp !== inputOtp) {
           return res.status(400).json({ message: "Incorrect OTP." });
         }
-    
+
         const hashedPassword = await bcrypt.hash(req.body.password, 10);
         const newUser = {
           firstName: req.body.firstName,
@@ -368,16 +442,16 @@ async function run() {
           password: hashedPassword,
           phoneNumber: req.body.phoneNumber,
         };
-    
+
         await usersCollection.insertOne(newUser);
         await otpCollection.deleteOne({ email });
-    
+
         res.status(201).json({ message: "User created successfully" });
       } catch (error) {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
-    
+
 
     app.post("/resend-otp", async (req, res) => {
       const { email } = req.body;
@@ -467,7 +541,7 @@ async function run() {
         );
 
         const resetLink = `https://www.aidifys.com/reset-password?token=${resetToken}`;
-        
+
         ////local link ///
         // const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
 
@@ -739,25 +813,61 @@ async function run() {
       }
     });
     app.get('/user-applied-jobs', authenticateToken, async (req, res) => {
-      try {
-        const userId = req.user.userId;
+      const userId = req.user.userId;
+      const page = parseInt(req.query.page) || 1;
+      const limit = 10;
+      const skip = (page - 1) * limit;
 
-        const applications = await jobApplicationsCollection.find({ userId }).toArray();
+      try {
+        const applications = await jobApplicationsCollection
+          .find({ userId })
+          .sort({ appliedAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
         const jobIds = applications.map(app => app.jobId);
 
-        const jobs = await jobsCollections.find({ _id: { $in: jobIds.map(id => new ObjectId(id)) } }).toArray();
+        const jobs = await jobsCollections
+          .find({ _id: { $in: jobIds.map(id => new ObjectId(id)) } })
+          .toArray();
 
-        res.json(jobs);
+        const jobsWithAppliedDate = jobs.map(job => {
+          const application = applications.find(app => app.jobId.toString() === job._id.toString());
+          return {
+            ...job,
+            appliedAt: application ? application.appliedAt : null,
+          };
+        });
+
+        const totalJobs = await jobApplicationsCollection.countDocuments({ userId });
+        const totalPages = Math.ceil(totalJobs / limit);
+
+        res.json({
+          jobs: jobsWithAppliedDate,
+          totalPages,
+          currentPage: page,
+          totalJobs,
+        });
       } catch (error) {
         console.error('Error fetching user applied jobs:', error);
         res.status(500).json({ message: 'Internal Server Error' });
       }
     });
+
+    function generateSlug(title) {
+      return title
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-');
+    }
     app.post("/create-blog", imageUpload.single("image"), async (req, res) => {
-      const { title, content } = req.body;
+      const { title, content, description, alttag } = req.body;
       const image = req.file;
 
-      if (!title || !content || !image) {
+      if (!title || !content || !image || !description || !alttag) {
         return res.status(400).json({ message: "All fields are required, including the image" });
       }
 
@@ -770,11 +880,16 @@ async function run() {
               return res.status(500).json({ message: "Error uploading to Cloudinary", error: error.message });
             }
 
+            const slug = generateSlug(title);
+
             const newBlog = {
               title,
               content,
+              description,
+              alttag,
               imageUrl: result.secure_url,
               cloudinaryId: result.public_id,
+              slug,
               createdAt: new Date(),
             };
 
@@ -790,6 +905,7 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error", error: error.message });
       }
     });
+
 
     app.delete("/delete-blog/:id", async (req, res) => {
       const { id } = req.params;
@@ -816,11 +932,11 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error", error: error.message });
       }
     });
-    app.get("/blog-detail/:id", async (req, res) => {
-      const { id } = req.params;
+    app.get("/blog-detail/:slug", async (req, res) => {
+      const { slug } = req.params;
 
       try {
-        const blog = await blogsCollection.findOne({ _id: new ObjectId(id) });
+        const blog = await blogsCollection.findOne({ slug });
 
         if (!blog) {
           return res.status(404).json({ message: "Blog not found." });
@@ -828,9 +944,11 @@ async function run() {
 
         res.status(200).json({ blog });
       } catch (error) {
+        console.error("Error fetching blog:", error.message);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
     app.get("/blogs", async (req, res) => {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 9;
