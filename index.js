@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require("crypto");
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const moment = require("moment");
 const path = require('path');
 const nodemailer = require('nodemailer');
 const cloudinary = require('cloudinary').v2;
@@ -87,6 +88,31 @@ async function run() {
     const blogsCollection = db.collection("blogs");
     const SUPER_ADMIN_EMAIL = "usama.mang0901@gmail.com";
 
+
+    async function generateUniqueSlug(jobTitle, existingId = null) {
+      let baseSlug = jobTitle
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^\w-]+/g, '');
+
+      let uniqueSlug = baseSlug;
+      let counter = 1;
+
+      while (true) {
+        const existingJob = await jobsCollections.findOne({
+          slug: uniqueSlug,
+          _id: { $ne: existingId ? new ObjectId(existingId) : null },
+        });
+
+        if (!existingJob) break;
+
+        uniqueSlug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+
+      return uniqueSlug;
+    }
     app.post("/post-job", async (req, res) => {
       try {
         let body = req.body;
@@ -105,11 +131,12 @@ async function run() {
         body.createdAt = new Date();
         body.superAdminEmail = SUPER_ADMIN_EMAIL;
 
+        body.slug = await generateUniqueSlug(body.jobTitle);
+
         let companyId = body.companyName
           .toLowerCase()
           .replace(/\s+/g, '-')
           .replace(/[^\w-]+/g, '');
-
         body.companyId = companyId;
 
         const result = await jobsCollections.insertOne(body);
@@ -118,6 +145,7 @@ async function run() {
           return res.status(201).send({
             message: "Job created successfully!",
             jobId: result.insertedId,
+            slug: body.slug,
             status: true
           });
         } else {
@@ -153,6 +181,11 @@ async function run() {
         body._id = new ObjectId(body._id);
         body.updatedAt = new Date();
         body.superAdminEmail = body.superAdminEmail || "usama.mang0901@gmail.com";
+
+        if (body.jobTitle) {
+          body.slug = await generateUniqueSlug(body.jobTitle, body._id);
+        }
+
         const result = await jobsCollections.findOneAndUpdate(
           { _id: body._id },
           { $set: body },
@@ -278,23 +311,12 @@ async function run() {
         res.status(500).send({ message: 'Internal Server Error' });
       }
     });
-    app.get("/all-jobs/:id", async (req, res) => {
-      const id = req.params.id;
-      const job = await jobsCollections.findOne({
-        _id: new ObjectId(id)
-      });
-      res.send(job);
-    });
 
-    app.get("/jobdetails/:id", async (req, res) => {
-      const jobId = req.params.id;
-
-      if (!ObjectId.isValid(jobId)) {
-        return res.status(400).send({ message: 'Invalid job ID' });
-      }
+    app.get("/job/:slug", async (req, res) => {
+      const slug = req.params.slug;
 
       try {
-        const job = await jobsCollections.findOne({ _id: new ObjectId(jobId) });
+        const job = await jobsCollections.findOne({ slug: slug });
         if (!job) {
           return res.status(404).send({ message: 'Job not found' });
         }
@@ -312,21 +334,46 @@ async function run() {
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
 
+        const dateRange = req.query.dateRange || "all";
+        let startDate = null;
+        let endDate = null;
+
+        if (dateRange === "1-month") {
+          endDate = moment().subtract(1, "months").toDate();
+          startDate = moment().subtract(2, "months").toDate();
+        } else if (dateRange === "2-months") {
+          endDate = moment().subtract(2, "months").toDate();
+          startDate = moment().subtract(3, "months").toDate();
+        } else if (dateRange === "3-months") {
+          endDate = moment().subtract(3, "months").toDate();
+          startDate = moment().subtract(4, "months").toDate();
+        }
+
         let jobs;
         let totalJobs;
 
         if (userEmail === SUPER_ADMIN_EMAIL) {
-          totalJobs = await jobsCollections.countDocuments({});
+          const query = {};
+          if (startDate && endDate) {
+            query.createdAt = { $gte: startDate, $lt: endDate };
+          }
+
+          totalJobs = await jobsCollections.countDocuments(query);
           jobs = await jobsCollections
-            .find({})
+            .find(query)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .toArray();
         } else {
-          totalJobs = await jobsCollections.countDocuments({ useremail: userEmail });
+          const query = { useremail: userEmail };
+          if (startDate && endDate) {
+            query.createdAt = { $gte: startDate, $lt: endDate };
+          }
+
+          totalJobs = await jobsCollections.countDocuments(query);
           jobs = await jobsCollections
-            .find({ useremail: userEmail })
+            .find(query)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -348,6 +395,13 @@ async function run() {
       }
     });
 
+    app.get("/all-jobs/:id", async (req, res) => {
+      const id = req.params.id;
+      const job = await jobsCollections.findOne({
+        _id: new ObjectId(id)
+      });
+      res.send(job);
+    });
 
     app.delete("/job/:id", async (req, res) => {
       const id = req.params.id;
@@ -670,14 +724,17 @@ async function run() {
     });
 
     app.post("/job/like", authenticateToken, async (req, res) => {
-      const { jobId, userId, action } = req.body;
+      const { slug, userId, action } = req.body;
 
-      if (!jobId || !userId || !action) {
-        return res.status(400).json({ message: "Invalid request. Job ID, user ID, and like/unlike action are required." });
+      if (!slug || !userId || !action) {
+        return res.status(400).json({
+          message: "Invalid request. Job slug, user ID, and like/unlike action are required.",
+        });
       }
 
       try {
-        const job = await jobsCollections.findOne({ _id: new ObjectId(jobId) });
+        // Find the job by slug
+        const job = await jobsCollections.findOne({ slug });
 
         if (!job) {
           return res.status(404).json({ message: "Job not found." });
@@ -686,24 +743,26 @@ async function run() {
         if (action === "like") {
           await usersCollection.updateOne(
             { _id: new ObjectId(userId) },
-            { $addToSet: { likedJobs: jobId } }
+            { $addToSet: { likedJobs: job.slug } }
           );
         } else if (action === "unlike") {
           await usersCollection.updateOne(
             { _id: new ObjectId(userId) },
-            { $pull: { likedJobs: jobId } }
+            { $pull: { likedJobs: job.slug } }
           );
         } else {
           return res.status(400).json({ message: "Invalid action. Use 'like' or 'unlike'." });
         }
 
-        res.status(200).json({ success: true, message: `Job successfully ${action}d.` });
+        res.status(200).json({
+          success: true,
+          message: `Job successfully ${action}d.`,
+        });
       } catch (error) {
         console.error("Error updating liked jobs:", error);
         res.status(500).json({ message: "Internal server error." });
       }
     });
-
 
     app.post('/apply', authenticateToken, upload.single('cvFile'), async (req, res) => {
       const { coverLetter, companyemail, companyjob, companyname, name, jobId, email } = req.body;
