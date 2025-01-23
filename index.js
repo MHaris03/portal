@@ -9,6 +9,7 @@ const moment = require("moment");
 const path = require('path');
 const nodemailer = require('nodemailer');
 const cloudinary = require('cloudinary').v2;
+const prerender = require('prerender-node');
 const port = process.env.PORT || 5000;
 require('dotenv').config();
 
@@ -37,9 +38,10 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
-
+prerender.set('prerenderToken', '4pnnN4qm9JQzNcWXZhD6');
 app.use(express.json());
 app.use(cors());
+app.use(prerender);
 const upload = multer({ dest: 'uploads/' });
 const storage = multer.memoryStorage();
 const imageUpload = multer({ storage: storage });
@@ -225,6 +227,71 @@ async function run() {
         });
       }
     });
+
+    // app.get("/all-jobs", async (req, res) => {
+    //   try {
+    //     // Get query parameters for pagination
+    //     const { page = 1, limit = 10 } = req.query;
+
+    //     // Convert page and limit to numbers
+    //     const pageNum = parseInt(page);
+    //     const limitNum = parseInt(limit);
+
+    //     // Calculate the number of jobs to skip
+    //     const skip = (pageNum - 1) * limitNum;
+
+    //     // Fetch paginated jobs sorted by `createdAt` in descending order
+    //     const jobsPromise = jobsCollections
+    //       .find({})
+    //       .sort({ createdAt: -1 }) // Sort by latest jobs first
+    //       .skip(skip)
+    //       .limit(limitNum)
+    //       .toArray();
+
+    //     // Fetch counts for categories and locations
+    //     const categoryCountsPromise = jobsCollections
+    //       .aggregate([
+    //         { $group: { _id: "$category", count: { $sum: 1 } } }
+    //       ])
+    //       .toArray();
+
+    //     const locationCountsPromise = jobsCollections
+    //       .aggregate([
+    //         { $group: { _id: "$jobLocation", count: { $sum: 1 } } }
+    //       ])
+    //       .toArray();
+
+    //     // Fetch total job count for pagination
+    //     const totalJobsPromise = jobsCollections.countDocuments();
+
+    //     // Await all promises
+    //     const [jobs, categoryCounts, locationCounts, totalJobs] = await Promise.all([
+    //       jobsPromise,
+    //       categoryCountsPromise,
+    //       locationCountsPromise,
+    //       totalJobsPromise
+    //     ]);
+
+    //     // Send the response
+    //     res.send({
+    //       status: true,
+    //       data: {
+    //         jobs,
+    //         totalJobs,
+    //         currentPage: pageNum,
+    //         totalPages: Math.ceil(totalJobs / limitNum),
+    //         categoryCounts,
+    //         locationCounts,
+    //       },
+    //     });
+    //   } catch (error) {
+    //     console.error(error);
+    //     return res.status(500).send({
+    //       message: "Internal Server Error",
+    //       status: false,
+    //     });
+    //   }
+    // });
 
     app.get("/company-jobs/:companyId", async (req, res) => {
       const companyId = req.params.companyId;
